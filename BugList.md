@@ -89,7 +89,6 @@ Please contact us or submit a PR if something is missing or inaccurate.
 82. SimpleLoopUnswitch reverses branch condition incorrectly (https://llvm.org/PR63962)
 83. Vectorization of loop reduction introduces an aligned store incorrectly (https://llvm.org/PR65212)
 
-
 ### Bugs found in Z3
 1. Incorrect bitblast for fprem (https://github.com/Z3Prover/z3/issues/2369)
 2. Bug in FPA w/ quantifiers (https://github.com/Z3Prover/z3/issues/2596)
