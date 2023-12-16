@@ -122,6 +122,9 @@ BinOp::BinOp(Type &type, string &&name, Value &lhs, Value &rhs, Op op,
   case LShr:
     assert((flags & Exact) == flags);
     break;
+  case Or:
+    assert((flags & Disjoint) == flags);
+    break;
   default:
     assert(flags == 0);
     break;
@@ -190,6 +193,8 @@ void BinOp::print(ostream &os) const {
     os << "nuw ";
   if (flags & Exact)
     os << "exact ";
+  if (flags & Disjoint)
+    os << "disjoint ";
   os << *lhs << ", " << rhs->getName();
 }
 
@@ -349,8 +354,8 @@ StateValue BinOp::toSMT(State &s) const {
     break;
 
   case Or:
-    fn = [](auto &a, auto &ap, auto &b, auto &bp) -> StateValue {
-      return { a | b, true };
+    fn = [&](auto &a, auto &ap, auto &b, auto &bp) -> StateValue {
+      return { a | b, (flags & Disjoint) ? (a & b) == 0 : true };
     };
     break;
 
@@ -2213,32 +2218,6 @@ void FnCall::print(ostream &os) const {
   os << ')' << attrs;
 }
 
-static void eq_bids(OrExpr &acc, Memory &m, const Type &t,
-                    const StateValue &val, const expr &bid) {
-  if (auto agg = t.getAsAggregateType()) {
-    for (unsigned i = 0, e = agg->numElementsConst(); i != e; ++i) {
-      eq_bids(acc, m, agg->getChild(i), agg->extract(val, i), bid);
-    }
-    return;
-  }
-
-  if (t.isPtrType()) {
-    acc.add(val.non_poison && Pointer(m, val.value).getBid() == bid);
-  }
-}
-
-static expr ptr_only_args(State &s, const Pointer &p) {
-  expr bid = p.getBid();
-  auto &m  = s.getMemory();
-
-  OrExpr e;
-  for (auto &in : s.getFn().getInputs()) {
-    if (hasPtr(in.getType()))
-      eq_bids(e, m, in.getType(), s[in], bid);
-  }
-  return e();
-}
-
 static void check_can_load(State &s, const expr &p0) {
   auto &attrs = s.getFn().getFnAttrs();
   if (attrs.mem.canReadAnything())
@@ -2251,10 +2230,10 @@ static void check_can_load(State &s, const expr &p0) {
   expr nonreadable = false;
 
   (attrs.mem.canRead(MemoryAccess::Globals) ? readable : nonreadable)
-    |= p.isWritableGlobal();
+    |= p.isWritableGlobal() && !p.isBasedOnArg();
 
   (attrs.mem.canRead(MemoryAccess::Args) ? readable : nonreadable)
-    |= ptr_only_args(s, p);
+    |= p.isBasedOnArg();
 
   s.addUB(std::move(readable));
   s.addUB(!nonreadable);
@@ -2273,10 +2252,10 @@ static void check_can_store(State &s, const expr &p0) {
   expr nonwritable = false;
 
   (attrs.mem.canWrite(MemoryAccess::Globals) ? writable : nonwritable)
-    |= p.isWritableGlobal();
+    |= p.isWritableGlobal() && !p.isBasedOnArg();
 
   (attrs.mem.canWrite(MemoryAccess::Args) ? writable : nonwritable)
-    |= ptr_only_args(s, p);
+    |= p.isBasedOnArg();
 
   s.addUB(std::move(writable));
   s.addUB(!nonwritable);
@@ -3185,10 +3164,18 @@ Assume::Assume(Value &cond, Kind kind)
 
 Assume::Assume(vector<Value *> &&args0, Kind kind)
     : Instr(Type::voidTy, "assume"), args(std::move(args0)), kind(kind) {
-  if (args.size() == 1)
-    assert(kind == AndNonPoison || kind == WellDefined || kind == NonNull);
-  else {
-    assert(kind == Align && args.size() == 2);
+  switch (kind) {
+    case AndNonPoison:
+    case WellDefined:
+    case NonNull:
+      assert(args.size() == 1);
+      break;
+
+    case Align:
+    case Dereferenceable:
+    case DereferenceableOrNull:
+      assert(args.size() == 2);
+      break;
   }
 }
 
@@ -3212,10 +3199,12 @@ void Assume::rauw(const Value &what, Value &with) {
 void Assume::print(ostream &os) const {
   const char *str = nullptr;
   switch (kind) {
-  case AndNonPoison: str = "assume "; break;
-  case WellDefined:  str = "assume_welldefined "; break;
-  case Align:        str = "assume_align "; break;
-  case NonNull:      str = "assume_nonnull "; break;
+  case AndNonPoison:          str = "assume "; break;
+  case WellDefined:           str = "assume_welldefined "; break;
+  case Align:                 str = "assume_align "; break;
+  case Dereferenceable:       str = "assume_dereferenceable "; break;
+  case DereferenceableOrNull: str = "assume_dereferenceable_or_null "; break;
+  case NonNull:               str = "assume_nonnull "; break;
   }
   os << str;
 
@@ -3247,11 +3236,19 @@ StateValue Assume::toSMT(State &s) const {
     s.addGuardableUB(Pointer(s.getMemory(), ptr).isAligned(align));
     break;
   }
+  case Dereferenceable:
+  case DereferenceableOrNull: {
+    const auto &vptr  = s.getAndAddPoisonUB(*args[0]).value;
+    const auto &bytes = s.getAndAddPoisonUB(*args[1]).value;
+    Pointer ptr(s.getMemory(), vptr);
+    expr nonnull = kind == DereferenceableOrNull ? !ptr.isNull() : false;
+    s.addUB(nonnull || merge(ptr.isDereferenceable(bytes, 1, false)));
+    break;
+  }
   case NonNull: {
     // assume(ptr)
-    const auto &vptr = s.getAndAddPoisonUB(*args[0]);
-    Pointer ptr(s.getMemory(), vptr.value);
-    s.addGuardableUB(!ptr.isNull());
+    const auto &ptr = s.getAndAddPoisonUB(*args[0]).value;
+    s.addGuardableUB(!Pointer(s.getMemory(), ptr).isNull());
     break;
   }
   }
@@ -3265,6 +3262,8 @@ expr Assume::getTypeConstraints(const Function &f) const {
   case AndNonPoison:
     return args[0]->getType().enforceIntType();
   case Align:
+  case Dereferenceable:
+  case DereferenceableOrNull:
     return args[0]->getType().enforcePtrType() &&
            args[1]->getType().enforceIntType();
   case NonNull:

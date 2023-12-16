@@ -45,6 +45,7 @@ static expr attr_to_bitvec(const ParamAttrs &attrs) {
   bits |= to_bit(has_nocapture, ParamAttrs::NoCapture);
   bits |= to_bit(has_noread, ParamAttrs::NoRead);
   bits |= to_bit(has_nowrite, ParamAttrs::NoWrite);
+  bits |= to_bit(has_ptr_arg, ParamAttrs::IsArg);
   return expr::mkUInt(bits, bits_for_ptrattrs);
 }
 
@@ -354,12 +355,10 @@ expr Pointer::isBlockAligned(uint64_t align, bool exact) const {
 }
 
 expr Pointer::isAligned(uint64_t align) {
-  if (align == 0)
-    return isNull();
   if (align == 1)
     return true;
   if (!is_power2(align))
-    return false;
+    return isNull();
 
   auto offset = getOffset();
   if (isUndef(offset))
@@ -394,10 +393,9 @@ expr Pointer::isAligned(const expr &align) {
     return isAligned(n);
 
   return
-    expr::mkIf(align == 0,
-               isNull(),
-               align.isPowerOf2() &&
-                 getAddress().urem(align.zextOrTrunc(bits_ptr_address)) == 0);
+    expr::mkIf(align.isPowerOf2(),
+               getAddress().urem(align.zextOrTrunc(bits_ptr_address)) == 0,
+               isNull());
 }
 
 static pair<expr, expr> is_dereferenceable(Pointer &p,
@@ -504,11 +502,11 @@ expr Pointer::getAllocType() const {
                    expr::mkUInt(0, 2));
 }
 
-expr Pointer::isStackAllocated() const {
+expr Pointer::isStackAllocated(bool simplify) const {
   // 1) if a stack object is returned by a callee it's UB
   // 2) if a stack object is given as argument by the caller, we can upgrade it
   //    to a global object, so we can do POR here.
-  if (!has_alloca || isLocal().isFalse())
+  if (simplify && (!has_alloca || isLocal().isFalse()))
     return false;
   return getAllocType() == STACK;
 }
@@ -538,7 +536,9 @@ expr Pointer::refined(const Pointer &other) const {
 
   return expr::mkIf(isNull(), other.isNull(),
                     expr::mkIf(isLocal(), std::move(local), nonlocal) &&
-                      isBlockAlive().implies(other_deref.isBlockAlive()));
+                      // FIXME: this should be disabled just for phy pointers
+                      (is_asm ? expr(true)
+                        : isBlockAlive().implies(other_deref.isBlockAlive())));
 }
 
 expr Pointer::fninputRefined(const Pointer &other, set<expr> &undef,
@@ -621,17 +621,23 @@ expr Pointer::isNocapture(bool simplify) const {
   return p.extract(0, 0) == 1;
 }
 
+#define GET_ATTR(attr, idx)          \
+  if (!attr)                         \
+    return false;                    \
+  unsigned idx_ = idx;               \
+  return p.extract(idx_, idx_) == 1;
+
 expr Pointer::isNoRead() const {
-  if (!has_noread)
-    return false;
-  return p.extract(has_nocapture, has_nocapture) == 1;
+  GET_ATTR(has_noread, (unsigned)has_nocapture);
 }
 
 expr Pointer::isNoWrite() const {
-  if (!has_nowrite)
-    return false;
-  unsigned idx = (unsigned)has_nocapture + (unsigned)has_noread;
-  return p.extract(idx, idx) == 1;
+  GET_ATTR(has_nowrite, (unsigned)has_nocapture + (unsigned)has_noread);
+}
+
+expr Pointer::isBasedOnArg() const {
+  GET_ATTR(has_ptr_arg, (unsigned)has_nocapture + (unsigned)has_noread +
+                        (unsigned)has_nowrite);
 }
 
 Pointer Pointer::mkNullPointer(const Memory &m) {

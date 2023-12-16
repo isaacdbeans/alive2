@@ -12,6 +12,7 @@
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Support/ModRef.h"
@@ -255,6 +256,10 @@ public:
       flags |= BinOp::NUW;
     if (isa<llvm::PossiblyExactOperator>(i) && i.isExact())
       flags = BinOp::Exact;
+    if (const auto *PDI = dyn_cast<llvm::PossiblyDisjointInst>(&i)) {
+      if (PDI->isDisjoint())
+        flags |= BinOp::Disjoint;
+    }
     RETURN_IDENTIFIER(make_unique<BinOp>(*ty, value_name(i), *a, *b, alive_op,
                                          flags));
   }
@@ -333,6 +338,19 @@ public:
         fn_decl = i.getModule()->getFunction(fn->getName());
     }
     if (fn_decl) {
+      // @llvm.assert is not special as far as LLVM is concerned, but in
+      // Alive we treat it as an alias for the simple
+      // (non-operand-bundle) version of @llvm.assume. its reason for
+      // existing is that the optimizer is not free to remove
+      // @llvm.assert, as it is @llvm.assume
+      if (fn_decl->getName() == "llvm.assert") {
+        auto &ctx = i.getContext();
+        assert(fn->getFunctionType() ==
+               llvm::FunctionType::get(llvm::Type::getVoidTy(ctx),
+                                       { llvm::Type::getInt1Ty(ctx) }, false));
+        return make_unique<Assume>(*args[0], Assume::AndNonPoison);
+      }
+
       Function::FnDecl decl;
       decl.name  = '@' + fn_decl->getName().str();
       decl.attrs = attrs;
@@ -1263,6 +1281,17 @@ public:
       case LLVMContext::MD_noundef:
         BB->addInstr(make_unique<Assume>(*i, Assume::WellDefined));
         break;
+
+      case LLVMContext::MD_dereferenceable:
+      case LLVMContext::MD_dereferenceable_or_null: {
+        auto kind = ID == LLVMContext::MD_dereferenceable
+                      ? Assume::Dereferenceable : Assume::DereferenceableOrNull;
+        auto bytes = get_operand(
+          llvm::mdconst::extract<llvm::ConstantInt>(Node->getOperand(0)));
+        BB->addInstr(
+          make_unique<Assume>(vector<Value*>{i, bytes}, kind));
+        break;
+      }
 
       // non-relevant for correctness
       case LLVMContext::MD_loop:

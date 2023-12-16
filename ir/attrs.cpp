@@ -161,6 +161,10 @@ bool MemoryAccess::canOnlyWrite(AccessType ty) const {
   return canWrite(ty);
 }
 
+bool MemoryAccess::canAccessAnything() const {
+  return canReadAnything() && canWriteAnything();
+}
+
 bool MemoryAccess::canReadAnything() const {
   for (unsigned i = 0; i < NumTypes; ++i) {
     if (!canRead(AccessType(i)))
@@ -322,11 +326,6 @@ void ParamAttrs::merge(const ParamAttrs &other) {
   derefOrNullBytes = max(derefOrNullBytes, other.derefOrNullBytes);
   blockSize        = max(blockSize, other.blockSize);
   align            = max(align, other.align);
-}
-
-static expr merge(pair<AndExpr, expr> e) {
-  e.first.add(std::move(e.second));
-  return std::move(e.first)();
 }
 
 static expr
