@@ -187,6 +187,7 @@ static bool error(Errors &errs, State &src_state, State &tgt_state,
         if (bw == Pointer::totalBits()) {
           Pointer p(src_state.returnMemory(), var);
           reduce(p.getOffset());
+          reduce(p.getAddress());
         }
       }
     } else if (var.isFloat()) {
@@ -501,10 +502,16 @@ check_refinement(Errors &errs, const Transform &t, State &src_state,
     axioms_expr = std::move(axioms)();
   }
 
-  if (config::check_if_src_is_ub &&
-      check_expr(axioms_expr && fndom_a).isUnsat()) {
-    errs.add("Source function is always UB", false);
-    return;
+  if (check_expr(axioms_expr && fndom_a).isUnsat()) {
+    if (config::fail_if_src_is_ub) {
+      errs.add("Source function is always UB", false);
+      return;
+    } else {
+      errs.addWarning(
+        "Source function is always UB.\n"
+        "It can be refined by any target function.\n"
+        "Please make sure this is what you wanted.");
+    }
   }
 
   {
@@ -1627,7 +1634,7 @@ void Transform::preprocess() {
       for (auto &i : bb->instrs()) {
         if (auto *load = dynamic_cast<const Load*>(&i)) {
           auto align = load->getAlign();
-          if (align != 1) {
+          if (align > load->getMaxAccessSize()) {
             static IntType i64("i64", 64);
             auto bytes = make_unique<IntConst>(i64, align);
             to_add.emplace_back(load, make_unique<Assume>(
@@ -1649,6 +1656,21 @@ void Transform::preprocess() {
       }
       to_add.clear();
       to_remove.clear();
+    }
+
+    // increase size of global variables to be a multiple of alignment
+    for (auto gv : tgt.getGlobalVars()) {
+      if (gv->isArbitrarySize())
+        continue;
+      auto align = gv->getAlignment();
+      auto sz = gv->size();
+      auto newsize = round_up(sz, align);
+      if (newsize != sz) {
+        gv->increaseSize(newsize);
+        if (auto src_gv = dynamic_cast<GlobalVariable*>(
+            src.getGlobalVar(gv->getName())))
+          src_gv->increaseSize(newsize);
+      }
     }
   }
 

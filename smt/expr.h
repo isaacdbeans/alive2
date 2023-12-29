@@ -88,7 +88,7 @@ public:
   static expr mkNaN(const expr &type);
   static expr mkNumber(const char *n, const expr &type);
   static expr mkVar(const char *name, const expr &type);
-  static expr mkVar(const char *name, unsigned bits);
+  static expr mkVar(const char *name, unsigned bits, bool fresh = false);
   static expr mkBoolVar(const char *name);
   static expr mkHalfVar(const char *name);
   static expr mkBFloatVar(const char *name);
@@ -339,7 +339,7 @@ public:
   static expr mkConstArray(const expr &domain, const expr &value);
 
   expr store(const expr &idx, const expr &val) const;
-  expr load(const expr &idx) const;
+  expr load(const expr &idx, uint64_t max_idx = UINT64_MAX) const;
 
   static expr mkIf(const expr &cond, const expr &then, const expr &els);
   static expr mkForAll(const std::set<expr> &vars, expr &&val);
