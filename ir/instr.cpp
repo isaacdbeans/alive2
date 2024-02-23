@@ -2679,6 +2679,10 @@ void FCmp::print(ostream &os) const {
   }
   os << getName() << " = fcmp " << fmath << condtxt << *a << ", "
      << b->getName();
+  if (signaling)
+    os << ", signaling";
+  if (!ex.ignore())
+    os << ", exceptions=" << ex;
 }
 
 StateValue FCmp::toSMT(State &s) const {
@@ -4267,21 +4271,13 @@ StateValue Memcmp::toSMT(State &s) const {
     if (is_bcmp) {
       result_neq = result_var;
     } else {
-      expr pos
-        = mkIf_fold(is_ptr1,
-                    val1.ptr().getAddress().uge(val2.ptr().getAddress()),
-                    val1.nonptrValue().uge(val2.nonptrValue()));
+      expr pos = val1.forceCastToInt().uge(val2.forceCastToInt());
       result_neq = expr::mkIf(pos, result_var, result_var_neg);
     }
 
-    // allow null <-> 0 comparison
-    expr val_eq =
-      (is_ptr1 == is_ptr2 &&
-       mkIf_fold(is_ptr1,
-                 val1.ptr().getAddress() == val2.ptr().getAddress(),
-                 val1.nonptrValue() == val2.nonptrValue())) ||
-      (val1.isZero() && val2.isZero());
+    expr val_eq = val1.forceCastToInt() == val2.forceCastToInt();
 
+    // allow null <-> 0 comparison
     expr np
       = (is_ptr1 == is_ptr2 || val1.isZero() || val2.isZero()) &&
         !val1.isPoison() && !val2.isPoison();

@@ -63,14 +63,14 @@ static bool is_constglb(unsigned bid, bool src_only = false) {
 // Return true if bid is the nonlocal block used to encode function calls' side
 // effects
 static unsigned get_fncallmem_bid() {
-  assert(has_write_fncall);
-  return num_nonlocals_src - num_inaccessiblememonly_fns - 1;
+  assert(has_write_fncall || num_inaccessiblememonly_fns > 0);
+  return num_nonlocals_src - num_inaccessiblememonly_fns - has_write_fncall;
 }
 
 static bool is_fncall_mem(unsigned bid) {
-  if (!has_write_fncall)
+  if (!has_write_fncall && num_inaccessiblememonly_fns == 0)
     return false;
-  return bid == get_fncallmem_bid();
+  return bid >= get_fncallmem_bid() && bid < num_nonlocals_src;
 }
 
 static void ensure_non_fncallmem(const Pointer &p) {
@@ -325,7 +325,7 @@ expr Byte::isZero() const {
 expr Byte::castPtrToInt() const {
   auto offset = ptrByteoffset().zextOrTrunc(bits_ptr_address);
        offset = offset * expr::mkUInt(bits_byte, offset);
-  return ptr().getAddress().lshr(offset).trunc(bits_byte);
+  return ptr().getAddress().lshr(offset).zextOrTrunc(bits_byte);
 }
 
 expr Byte::forceCastToInt() const {
@@ -1433,26 +1433,20 @@ expr Memory::mkInput(const char *name, const ParamAttrs &attrs0) {
   return std::move(p).release();
 }
 
-pair<expr, expr> Memory::mkUndefInput(const ParamAttrs &attrs0) const {
-  bool nonnull = attrs0.has(ParamAttrs::NonNull);
-  unsigned log_offset = ilog2_ceil(bits_for_offset, false);
-  unsigned bits_undef = bits_for_offset + nonnull * log_offset;
-  expr undef = expr::mkFreshVar("undef", expr::mkUInt(0, bits_undef));
-  expr offset = undef;
+pair<expr, expr> Memory::mkUndefInput(const ParamAttrs &attrs0) {
+  unsigned bits = bits_for_offset + bits_for_bid - Pointer::hasLocalBit();
+  expr undef = expr::mkFreshVar("undef", expr::mkUInt(0, bits));
 
-  if (nonnull) {
-    expr var = undef.extract(log_offset - 1, 0);
-    expr one = expr::mkUInt(1, bits_for_offset);
-    expr shl = expr::mkIf(var.ugt(bits_for_offset-1),
-                          one,
-                          one << var.zextOrTrunc(bits_for_offset));
-    offset = undef.extract(bits_undef - 1, log_offset) | shl;
-  }
   auto attrs = attrs0;
   attrs.set(ParamAttrs::IsArg);
-  return
-    { Pointer(*this, expr::mkUInt(0, bits_for_bid), offset, attrs).release(),
-      std::move(undef) };
+  Pointer ptr(*this,
+              Pointer::mkLongBid(undef.extract(bits-1, bits_for_offset), false),
+              undef.extract(bits_for_offset-1, 0), attrs);
+
+  if (attrs0.has(ParamAttrs::NonNull))
+    state->addPre(!ptr.isNull());
+
+  return { std::move(ptr).release(), std::move(undef) };
 }
 
 expr Memory::PtrInput::implies(const PtrInput &rhs) const {
@@ -1618,7 +1612,7 @@ void Memory::setState(const Memory::CallState &st,
     assert(st.non_local_block_val.size() == 1);
     unsigned bid
       = num_nonlocals_src - num_inaccessiblememonly_fns + inaccessible_bid;
-    assert(bid < num_nonlocals_src);
+    assert(is_fncall_mem(bid));
     assert(non_local_block_val[bid].undef.empty());
     non_local_block_val[bid].val = st.non_local_block_val[0];
   }
