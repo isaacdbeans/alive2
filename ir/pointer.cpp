@@ -427,9 +427,13 @@ static pair<expr, expr> is_dereferenceable(Pointer &p,
 // When bytes is 0, pointer is always dereferenceable
 pair<AndExpr, expr>
 Pointer::isDereferenceable(const expr &bytes0, uint64_t align,
-                           bool iswrite, bool ignore_accessability) {
-  expr bytes_off = bytes0.zextOrTrunc(bits_for_offset);
+                           bool iswrite, bool ignore_accessability,
+                           bool round_size_to_align) {
   expr bytes = bytes0.zextOrTrunc(bits_size_t);
+  if (round_size_to_align)
+    bytes = bytes.round_up(expr::mkUInt(align, bits_size_t));
+  expr bytes_off = bytes.zextOrTrunc(bits_for_offset);
+
   DisjointExpr<expr> UB(expr(false)), is_aligned(expr(false)), all_ptrs;
 
   for (auto &[ptr_expr, domain] : DisjointExpr<expr>(p, 3)) {
@@ -464,9 +468,10 @@ Pointer::isDereferenceable(const expr &bytes0, uint64_t align,
 
 pair<AndExpr, expr>
 Pointer::isDereferenceable(uint64_t bytes, uint64_t align,
-                           bool iswrite, bool ignore_accessability) {
+                           bool iswrite, bool ignore_accessability,
+                           bool round_size_to_align) {
   return isDereferenceable(expr::mkUInt(bytes, bits_size_t), align, iswrite,
-                           ignore_accessability);
+                           ignore_accessability, round_size_to_align);
 }
 
 // This function assumes that both begin + len don't overflow
@@ -634,6 +639,17 @@ expr Pointer::isNoWrite() const {
 expr Pointer::isBasedOnArg() const {
   GET_ATTR(has_ptr_arg, (unsigned)has_nocapture + (unsigned)has_noread +
                         (unsigned)has_nowrite);
+}
+
+Pointer Pointer::setAttrs(const ParamAttrs &attr) const {
+  return { m, getBid(), getOffset(), getAttrs() | attr_to_bitvec(attr) };
+}
+
+Pointer Pointer::setIsBasedOnArg() const {
+  unsigned idx = (unsigned)has_nocapture + (unsigned)has_noread +
+                 (unsigned)has_nowrite;
+  auto attrs = getAttrs();
+  return { m, getBid(), getOffset(), attrs | expr::mkUInt(1 << idx, attrs) };
 }
 
 Pointer Pointer::mkNullPointer(const Memory &m) {

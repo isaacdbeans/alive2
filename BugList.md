@@ -94,6 +94,12 @@ Please contact us or submit a PR if something is missing or inaccurate.
 87. InstCombine: incorrect vector fshr->shl transformation (https://llvm.org/PR89338)
 88. VectorCombine: shufflevector reorder leads to srem by poison (https://llvm.org/PR89390)
 89. InstCombine: incorrect srem rewrite (https://llvm.org/PR89516)
+90. InstCombine: incorrect swap of select vector operands (https://llvm.org/89669)
+91. SimplifyCFG: coallesced store retains the wrong alignment (https://llvm.org/PR89672)
+92. LoopVectorize introduces division by zero (https://llvm.org/PR89958)
+93. InstCombine: align attribute doesn't dereferenceability (https://llvm.org/PR90446)
+94. Reassociate: invalid propagation of overflow attributes at low bit-width (https://llvm.org/PR91417)
+95. InstCombine: removes a select, making the code more poisonous (https://llvm.org/PR91691)
 
 ### Bugs found in Z3
 1. Incorrect bitblast for fprem (https://github.com/Z3Prover/z3/issues/2369)
