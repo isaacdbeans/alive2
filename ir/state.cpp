@@ -1056,13 +1056,8 @@ State::addFnCall(const string &name, vector<StateValue> &&inputs,
       }
     }
 
-    expr uf = expr::mkUF("#access_" + name, { fn_ptr }, memaccess.val);
-    if (auto acc = std::move(decl_access)()) {
-      memaccess &= SMTMemoryAccess::mkIf(decl_access.domain(), *acc,
-                                         std::move(uf));
-    } else {
-      memaccess &= std::move(uf);
-    }
+    memaccess &= *std::move(decl_access).mk(SMTMemoryAccess{
+      expr::mkUF("#access_" + name, { fn_ptr }, memaccess.val)});
   }
 
   if (!memaccess.canWrite(MemoryAccess::Args).isFalse() ||
@@ -1100,8 +1095,8 @@ State::addFnCall(const string &name, vector<StateValue> &&inputs,
     auto call_data_pair
       = calls_fn.try_emplace(
           { std::move(inputs), std::move(ptr_inputs), std::move(call_ranges),
-            mkIf_fold(memaccess.canReadSomething(), memory.dup(),
-                      memory.dupNoRead()),
+            memaccess.canReadSomething().isFalse()
+              ? memory.dupNoRead() : memory.dup(),
             memaccess, noret, willret });
     auto &I = call_data_pair.first;
     bool inserted = call_data_pair.second;
