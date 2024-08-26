@@ -32,14 +32,13 @@
 class Mutator {
 protected:
   bool debug;
-
   llvm::LLVMContext context;
   llvm::ExitOnError ExitOnErr;
   std::shared_ptr<llvm::Module> pm;
 
 public:
-  Mutator(bool debug = false) : debug(debug), pm(nullptr){};
-  virtual ~Mutator(){};
+  Mutator(bool debug = false) : debug(debug), pm(nullptr) {};
+  virtual ~Mutator() {};
 
   bool openInputFile(const string &inputFile);
   virtual bool init() = 0;
@@ -76,8 +75,8 @@ class StubMutator : public Mutator {
   void moveToNextFunction();
 
 public:
-  StubMutator(bool debug) : Mutator(debug){};
-  virtual ~StubMutator(){};
+  StubMutator(bool debug) : Mutator(debug) {};
+  virtual ~StubMutator() {};
   virtual bool init() override;
   virtual void mutateModule(const std::string &outputFileName) override;
   virtual void saveModule(const std::string &outputFileName) override;
@@ -110,6 +109,7 @@ class FunctionMutator {
   friend class BinaryInstructionHelper;
   friend class EliminateUndefHelper;
   friend class ResizeIntegerHelper;
+  friend class UnaryInstHelper;
 
   llvm::Function *currentFunction, *functionInTmp;
   llvm::ValueToValueMapTy &vMap;
@@ -226,7 +226,7 @@ class ModuleMutator : public Mutator {
   void resetTmpModule();
 
 public:
-  ModuleMutator(bool debug = false) : Mutator(debug){};
+  ModuleMutator(bool debug = false) : Mutator(debug) {};
   ModuleMutator(std::shared_ptr<llvm::Module> pm_,
                 const llvm::StringSet<> &invalidFunctions, bool debug = false,
                 bool onEveryFunction = false, bool randomMutate = false)
@@ -241,7 +241,7 @@ public:
         curFunction(0) {
     pm = pm_;
   }
-  ~ModuleMutator(){};
+  ~ModuleMutator() {};
   virtual bool init() override;
   virtual void mutateModule(const std::string &outputFileName) override;
   virtual std::string getCurrentFunction() const override {
