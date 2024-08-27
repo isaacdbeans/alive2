@@ -3,6 +3,7 @@ Alive2 TODO list
 
 Making counterexamples easier to read
 -------------------------------------
+- add vector mutations such as shufflevector, insertelement, changing vector size, manually setting vector values, and changing functions being applied to the vector
 
 - don't use undef/poison in CEX unless necessary
 
