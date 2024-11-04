@@ -1657,17 +1657,6 @@ pair<expr, expr> Memory::mkUndefInput(const ParamAttrs &attrs0) {
   return { std::move(ptr).release(), std::move(undef) };
 }
 
-expr Memory::PtrInput::implies(const PtrInput &rhs) const {
-  return implies_attrs(rhs) && val == rhs.val && idx == rhs.idx;
-}
-
-expr Memory::PtrInput::implies_attrs(const PtrInput &rhs) const {
-  return byval == rhs.byval &&
-         rhs.noread   .implies(noread) &&
-         rhs.nowrite  .implies(nowrite) &&
-         rhs.nocapture.implies(nocapture);
-}
-
 Memory::FnRetData Memory::FnRetData::mkIf(const expr &cond, const FnRetData &a,
                                           const FnRetData &b) {
   return { expr::mkIf(cond, a.size, b.size),
@@ -2586,12 +2575,8 @@ Memory::refined(const Memory &other, bool fncall,
     if (p.isByval().isTrue() && q.isByval().isTrue())
       continue;
 
-    // In assembly mode we verify each function individually and
-    // global constants are not validated (assumed to be correct).
-    // Hence we may not have all initializers if tgt doesn't reference them.
-    if (other.isAsmMode() &&
-        is_constglb(bid) &&
-        isInitialMemBlock(other.non_local_block_val[bid].val, false))
+    // Constants that are not referenced can be removed.
+    if (is_constglb(bid) && !other.state->isGVUsed(bid))
       continue;
 
     ret &= (ptr_bid == bid_expr).implies(blockRefined(p, q, bid, undef_vars));

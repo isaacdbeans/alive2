@@ -891,7 +891,7 @@ expr State::FnCallInput::implies(const FnCallInput &rhs) const {
 expr State::FnCallInput::refinedBy(
   State &s, const string &callee, unsigned inaccessible_bid,
   const vector<StateValue> &args_nonptr2,
-  const vector<Memory::PtrInput> &args_ptr2,
+  const vector<PtrInput> &args_ptr2,
   const ValueAnalysis::FnCallRanges &fncall_ranges2,
   const Memory &m2, const SMTMemoryAccess &memaccess2, bool noret2,
   bool willret2) const {
@@ -933,7 +933,7 @@ expr State::FnCallInput::refinedBy(
 
   if (memaccess2.canReadSomething().isTrue()) {
     bool argmemonly = memaccess2.canOnlyRead(MemoryAccess::Args).isTrue();
-    vector<Memory::PtrInput> dummy1, dummy2;
+    vector<PtrInput> dummy1, dummy2;
     auto restrict_ptrs = argmemonly ? &args_ptr : nullptr;
     auto restrict_ptrs2 = argmemonly ? &args_ptr2 : nullptr;
     if (memaccess2.canOnlyRead(MemoryAccess::Inaccessible).isTrue()) {
@@ -1004,7 +1004,7 @@ expr State::FnCallOutput::implies(const FnCallOutput &rhs,
 
 StateValue
 State::addFnCall(const string &name, vector<StateValue> &&inputs,
-                 vector<Memory::PtrInput> &&ptr_inputs,
+                 vector<PtrInput> &&ptr_inputs,
                  const Type &out_type, StateValue &&ret_arg,
                  const Type *ret_arg_ty, vector<StateValue> &&ret_args,
                  const FnAttrs &attrs, unsigned indirect_call_hash) {
@@ -1392,13 +1392,22 @@ void State::markGlobalAsAllocated(const string &glbvar) {
   itr->second.second = true;
 }
 
+bool State::isGVUsed(unsigned bid) const {
+  for (auto &[gv_name, data] : glbvar_bids) {
+    if (bid == data.first)
+      return getFn().getUsers().count(getFn().getGlobalVar(gv_name));
+  }
+  assert(false);
+  return false;
+}
+
 void State::syncSEdataWithSrc(State &src) {
   assert(glbvar_bids.empty());
   assert(src.isSource() && !isSource());
   glbvar_bids = src.glbvar_bids;
-  for (auto &itm : glbvar_bids)
-    itm.second.second = false;
-
+  for (auto &[gv_name, data] : glbvar_bids) {
+    data.second = false;
+  }
   fn_call_data = std::move(src.fn_call_data);
   inaccessiblemem_bids = std::move(src.inaccessiblemem_bids);
   memory.syncWithSrc(src.returnMemory());
